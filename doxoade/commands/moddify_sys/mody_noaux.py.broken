@@ -1,0 +1,516 @@
+# -*- coding: utf-8 -*-
+"""mody_noaux.py v2 — parser e applier de código bruto (--noaux).
+
+Fase 1: OP_ADD_IMPL, OP_ADD_TYPE, OP_ADD_INCLUDE, OP_ADD_MACRO
+Fase 2: OP_ADD_PROTO (pendente)
+Fase 3: OP_MOD_BODY, OP_MOD_BRANCH (pendente)
+"""
+from __future__ import annotations
+import hashlib
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+
+@dataclass
+class RawBlock:
+    path: str
+    code: str
+    code_hash: str = ""
+    op: str = "UNKNOWN"
+    name: str = ""
+    sig_first_line: str = ""
+    phase: int = 0
+    # Compat com v1:
+    kind: str = ""
+    signature: str = ""
+    anchor: Optional[str] = None
+
+
+@dataclass
+class RawPatch:
+    blocks: List[RawBlock] = field(default_factory=list)
+    parse_errors: List[str] = field(default_factory=list)
+
+
+# ────────────────────────────────────────────────────────────────
+# Separação e normalização
+# ────────────────────────────────────────────────────────────────
+
+_SEPARATOR = re.compile(r'^\s*---\s*$', re.MULTILINE)
+_PATH_RE = re.compile(
+    r'^[\w./\\:-]+\.(c|h|py|cpp|hpp|cc|cxx|txt|md|toml|json|yaml|yml)$'
+)
+
+
+def _normalize_code(code: str) -> str:
+    lines = [ln.rstrip() for ln in code.splitlines()]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return '\n'.join(lines)
+
+
+def _hash_code(code: str) -> str:
+    return hashlib.sha256(_normalize_code(code).encode('utf-8')).hexdigest()[:16]
+
+
+# ────────────────────────────────────────────────────────────────
+# Classifier multiline (Fase 1 core)
+# ────────────────────────────────────────────────────────────────
+
+_C_KEYWORDS = frozenset({
+    'if', 'else', 'while', 'for', 'switch', 'do', 'return',
+    'case', 'break', 'continue', 'goto', 'default', 'sizeof',
+    'typedef', 'struct', 'union', 'enum',
+    'static', 'extern', 'inline', 'const', 'volatile',
+    'void', 'char', 'short', 'int', 'long', 'float', 'double',
+    'unsigned', 'signed',
+})
+
+_SIG_TERMINATOR_RE = re.compile(r'[;{]')
+_FUNC_NAME_RE = re.compile(r'([A-Za-z_]\w*)\s*\(')
+_INCLUDE_PATH_RE = re.compile(r'[<"]([^>"]+)[>"]')
+_DEFINE_NAME_RE = re.compile(r'#\s*define\s+(\w+)')
+_STRUCT_TAG_RE = re.compile(r'\b(?:struct|union|enum)\s+(\w+)\s*\{')
+_TYPEDEF_NAME_RE = re.compile(r'\}\s*(\w+)\s*;')
+
+
+def _scan_signature(code: str, max_lines: int = 10) -> Tuple[str, str, Optional[str]]:
+    """Junta linhas até terminator (; ou { de function body).
+
+    Cuidados:
+    - `= {` (inicializador) NÃO é terminator `{`
+    - `;` em statement é terminator
+    - keyword C no início indica control flow (não function head)
+    """
+    lines = code.split('
+')
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if not lines:
+        return ("", "", None)
+
+    sig_parts = []
+    sig_first = ""
+    terminator = None
+    for ln in lines[:max_lines]:
+        stripped = ln.strip()
+        if not stripped or stripped.startswith(('/*', '//', '*')):
+            continue
+        if not sig_first:
+            sig_first = ln.rstrip()
+        sig_parts.append(stripped)
+
+        # procura `{` primeiro
+        brace_pos = stripped.find('{')
+        if brace_pos >= 0:
+            before_brace = stripped[:brace_pos]
+            full_before = ' '.join(sig_parts[:-1]) + ' ' + before_brace
+            # `=` antes do `{` → inicializador, não body
+            if '=' not in full_before:
+                terminator = '{'
+                break
+
+        # procura `;`
+        if ';' in stripped:
+            terminator = ';'
+            break
+
+    return (' '.join(sig_parts), sig_first, terminator)
+
+def _looks_like_declaration(sig_join: str) -> bool:
+    """True se sig_join começa com declaração local (Type var = ...)."""
+    first_paren = sig_join.find('(')
+    first_eq = sig_join.find('=')
+    if first_eq >= 0 and (first_paren < 0 or first_eq < first_paren):
+        return True
+    return False
+
+
+def _looks_like_function_head(sig_join: str) -> bool:
+    """True se sig_join parece ret_type name(args)."""
+    if '(' not in sig_join:
+        return False
+    if _looks_like_declaration(sig_join):
+        return False
+    m = _FUNC_NAME_RE.search(sig_join)
+    if not m:
+        return False
+    name = m.group(1)
+    if name in _C_KEYWORDS:
+        return False
+    return True
+
+
+def classify_block_multiline(
+    code: str, target_ext: str = ""
+) -> Tuple[str, str, str, int]:
+    """Retorna (op, name, sig_first, phase)."""
+    sig_join, sig_first, terminator = _scan_signature(code)
+    if not sig_join:
+        return ("UNKNOWN", "", "", 0)
+
+    # ── Include ──
+    if sig_join.startswith('#include') or sig_join.startswith('# include'):
+        m = _INCLUDE_PATH_RE.search(sig_join)
+        return ("OP_ADD_INCLUDE", m.group(1) if m else "", sig_first, 1)
+
+    # ── Macro ──
+    if sig_join.startswith('#define') or sig_join.startswith('# define'):
+        m = _DEFINE_NAME_RE.search(sig_join)
+        return ("OP_ADD_MACRO", m.group(1) if m else "", sig_first, 1)
+
+    # ── Type ──
+    if 'typedef' in sig_join or _STRUCT_TAG_RE.search(sig_join):
+        m_tag = _STRUCT_TAG_RE.search(sig_join)
+        if m_tag:
+            return ("OP_ADD_TYPE", m_tag.group(1), sig_first, 1)
+        m_td = _TYPEDEF_NAME_RE.search(code)
+        return ("OP_ADD_TYPE", m_td.group(1) if m_td else "", sig_first, 1)
+
+    # ── Prototype (com guards) ──
+    if terminator == ';':
+        if not _looks_like_declaration(sig_join):
+            m = _FUNC_NAME_RE.search(sig_join)
+            if m and m.group(1) not in _C_KEYWORDS:
+                return ("OP_ADD_PROTO", m.group(1), sig_first, 2)
+
+    # ── Function impl (com guards) ──
+    if terminator == '{':
+        if _looks_like_function_head(sig_join):
+            m = _FUNC_NAME_RE.search(sig_join)
+            return ("OP_ADD_IMPL", m.group(1), sig_first, 1)
+        # keyword no início (if/while/for) ou declaração → fragment
+        if '{' in code and '}' in code:
+            return ("OP_MOD_BODY", "", sig_first, 3)
+
+    # ── Fragment fallback ──
+    if '{' in code and '}' in code:
+        return ("OP_MOD_BODY", "", sig_first, 3)
+
+    return ("UNKNOWN", "", sig_first, 0)
+
+# ────────────────────────────────────────────────────────────────
+# Parser
+# ────────────────────────────────────────────────────────────────
+
+def _parse_anchor_hint(code: str) -> Tuple[Optional[str], str]:
+    lines = code.split('\n')
+    if lines and lines[0].strip().startswith('# ANCHOR:'):
+        return (lines[0].split(':', 1)[1].strip(), '\n'.join(lines[1:]))
+    return (None, code)
+
+
+def parse_noaux(text: str, project_root: Path) -> RawPatch:
+    patch = RawPatch()
+    for chunk in _SEPARATOR.split(text):
+        chunk = chunk.strip('\n\r')
+        if not chunk.strip():
+            continue
+        lines = chunk.split('\n')
+        path = lines[0].strip()
+        if not _PATH_RE.match(path):
+            patch.parse_errors.append(f"path inválido: {path[:60]}")
+            continue
+        rest = 1
+        while rest < len(lines) and not lines[rest].strip():
+            rest += 1
+        if rest >= len(lines):
+            patch.parse_errors.append(f"sem código: {path[:60]}")
+            continue
+        code = '\n'.join(lines[rest:])
+        if not code.strip():
+            continue
+        anchor, code_clean = _parse_anchor_hint(code)
+        ext = Path(path).suffix.lower()
+        op, name, sig_first, phase = classify_block_multiline(code_clean, ext)
+        patch.blocks.append(RawBlock(
+            path=path, code=code_clean,
+            code_hash=_hash_code(code_clean),
+            op=op, name=name, sig_first_line=sig_first,
+            phase=phase, kind=op.lower(), anchor=anchor,
+        ))
+    return patch
+
+
+# ────────────────────────────────────────────────────────────────
+# Idempotence
+# ────────────────────────────────────────────────────────────────
+
+def _find_code_in_file(code: str, file_lines: List[str]) -> Optional[int]:
+    norm = _normalize_code(code)
+    if not norm:
+        return None
+    needle = norm.split('\n')
+    hay = [ln.rstrip() for ln in file_lines]
+    n = len(needle)
+    for i in range(len(hay) - n + 1):
+        if hay[i:i + n] == needle:
+            return i
+    return None
+
+
+def _find_name_in_file(op: str, name: str, file_lines: List[str]) -> Optional[int]:
+    if not name:
+        return None
+    text = '\n'.join(file_lines)
+    pat = None
+    if op in ("OP_ADD_IMPL", "OP_ADD_PROTO"):
+        pat = re.compile(r'\b' + re.escape(name) + r'\s*\(')
+    elif op == "OP_ADD_TYPE":
+        pat = re.compile(
+            r'\b(?:struct|union|enum)\s+' + re.escape(name) + r'\b'
+            r'|\}\s*' + re.escape(name) + r'\s*;'
+        )
+    elif op == "OP_ADD_INCLUDE":
+        pat = re.compile(r'#\s*include\s*[<"]' + re.escape(name) + r'[>"]')
+    elif op == "OP_ADD_MACRO":
+        pat = re.compile(r'#\s*define\s+' + re.escape(name) + r'\b')
+    if pat is None:
+        return None
+    m = pat.search(text)
+    if m:
+        return text[:m.start()].count('\n') + 1
+    return None
+
+
+# ────────────────────────────────────────────────────────────────
+# Insertion points
+# ────────────────────────────────────────────────────────────────
+
+def _find_insertion_point_for_op(
+    op: str, name: str, file_lines: List[str]
+) -> Tuple[int, str]:
+    """Retorna (idx_0based, motivo). idx -1 → não encontrou."""
+    if op == "OP_ADD_INCLUDE":
+        last = 0
+        for i, ln in enumerate(file_lines):
+            if re.match(r'#\s*include', ln):
+                last = i + 1
+        return (last, "após último #include")
+
+    if op == "OP_ADD_MACRO":
+        last = 0
+        for i, ln in enumerate(file_lines):
+            if re.match(r'#\s*define', ln):
+                last = i + 1
+        if last == 0:
+            for i, ln in enumerate(file_lines):
+                if re.match(r'#\s*include', ln):
+                    last = i + 1
+        return (last, "após último #define" if last else "início do arquivo")
+
+    if op == "OP_ADD_TYPE":
+        for i, ln in enumerate(file_lines):
+            if re.search(r'\w+\s*\([^;]*\)\s*[;{]', ln):
+                return (i, f"antes de 1ª função/prototype em L{i+1}")
+        return (len(file_lines), "append")
+
+    if op == "OP_ADD_IMPL":
+        # Estratégia 1: prefix (dom_* → após dom_*)
+        if name and '_' in name:
+            prefix = name.split('_')[0] + '_'
+            func_re = re.compile(r'\b(' + re.escape(prefix) + r'\w+)\s*\(')
+            last_match = -1
+            for i, ln in enumerate(file_lines):
+                if func_re.search(ln):
+                    last_match = i
+            if last_match >= 0:
+                depth = 0
+                end = last_match
+                for i in range(last_match, len(file_lines)):
+                    depth += file_lines[i].count('{') - file_lines[i].count('}')
+                    if depth == 0 and i > last_match:
+                        end = i + 1
+                        break
+                return (end, f"após {prefix}* (último em L{last_match+1})")
+        # Estratégia 2: após última função completa
+        last_func_end = 0
+        depth = 0
+        in_func = False
+        for i, ln in enumerate(file_lines):
+            if re.search(r'\w+\s*\([^;]*\)\s*\{', ln):
+                in_func = True
+                depth = ln.count('{') - ln.count('}')
+            elif in_func:
+                depth += ln.count('{') - ln.count('}')
+                if depth <= 0:
+                    last_func_end = i + 1
+                    in_func = False
+        return (last_func_end, "append após última função")
+
+    return (-1, f"op {op} não implementada nesta fase")
+
+
+# ────────────────────────────────────────────────────────────────
+# Resolve target
+# ────────────────────────────────────────────────────────────────
+
+def _resolve_target(block_path: str, root: Path) -> Tuple[Optional[Path], str]:
+    direct = (root / block_path.replace('\\', '/')).resolve()
+    if direct.exists():
+        return (direct, "")
+    basename = Path(block_path).name
+    candidates = [
+        c for c in root.rglob(basename)
+        if '.doxoade' not in str(c) and '.git' not in str(c)
+    ]
+    if len(candidates) == 1:
+        return (candidates[0], f"resolvido → {candidates[0].relative_to(root)}")
+    if len(candidates) > 1:
+        rels = [str(c.relative_to(root)) for c in candidates[:5]]
+        return (None, f"múltiplos: {', '.join(rels)}")
+    return (None, f"não encontrado: {basename}")
+
+
+# ────────────────────────────────────────────────────────────────
+# Apply
+# ────────────────────────────────────────────────────────────────
+
+def _write(
+    target: Path, content: str, apply: bool,
+    shadow_dir: Optional[Path], root: Path, report: dict
+) -> bool:
+    write_to = target
+    if shadow_dir:
+        try:
+            rel = target.relative_to(root)
+        except ValueError:
+            rel = Path(target.name)
+        write_to = shadow_dir / rel
+        write_to.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(write_to, 'w', encoding='utf-8') as f:
+            f.write(content)
+        report["saved"] = not shadow_dir
+        report["shadow_saved"] = bool(shadow_dir)
+        return True
+    except Exception as e:
+        report["errors"].append(f"write: {e}")
+        return False
+
+
+def apply_raw_block(
+    block: RawBlock, root: Path,
+    apply: bool = False,
+    shadow_dir: Optional[Path] = None,
+) -> dict:
+    report = {
+        "path": block.path,
+        "op": block.op,
+        "name": block.name,
+        "sig_first": block.sig_first_line,
+        "hash": block.code_hash,
+        "status": "UNKNOWN",
+        "insert_at": None,
+        "reason": "",
+        "errors": [],
+        "saved": False,
+        "shadow_saved": False,
+        "preview": "",
+        "target": "",
+    }
+
+    # Gate de fase
+    if block.phase == 2:
+        report["status"] = "PHASE_PENDING"
+        report["errors"].append(f"{block.op} será implementada na Fase 2")
+        return report
+    if block.phase == 3:
+        report["status"] = "PHASE_PENDING"
+        report["errors"].append(f"{block.op} será implementada na Fase 3")
+        return report
+    if block.phase == 0:
+        report["status"] = "UNKNOWN_OP"
+        report["errors"].append("classifier não reconheceu o bloco")
+        return report
+
+    target, msg = _resolve_target(block.path, root)
+    if target is None:
+        report["status"] = "PATH_FAIL"
+        report["errors"].append(msg)
+        return report
+    report["target"] = str(target)
+    if msg:
+        report["reason"] = msg
+
+    if not target.exists():
+        report["status"] = "NOVO_ARQUIVO"
+        content = _normalize_code(block.code) + '\n'
+        if apply or shadow_dir:
+            _write(target, content, apply, shadow_dir, root, report)
+        return report
+
+    try:
+        file_lines = target.read_text(encoding='utf-8', errors='ignore').splitlines()
+    except Exception as e:
+        report["errors"].append(f"read: {e}")
+        return report
+
+    # 1) Hash idempotence
+    pos = _find_code_in_file(block.code, file_lines)
+    if pos is not None:
+        report["status"] = "IDEMPOTENT"
+        report["insert_at"] = pos + 1
+        report["reason"] = f"bloco verbatim em L{pos + 1}"
+        return report
+
+    # 2) Name idempotence
+    name_pos = _find_name_in_file(block.op, block.name, file_lines)
+    if name_pos is not None:
+        report["status"] = "IDEMPOTENT"
+        report["insert_at"] = name_pos
+        report["reason"] = f"nome '{block.name}' já em L{name_pos}"
+        return report
+
+    # 3) Insertion
+    insert_at, why = _find_insertion_point_for_op(
+        block.op, block.name, file_lines
+    )
+    report["reason"] = why
+    if insert_at < 0:
+        report["status"] = "ANCHOR_REQUIRED"
+        report["errors"].append(why)
+        return report
+    report["insert_at"] = insert_at + 1
+
+    # 4) Build content
+    code_lines = _normalize_code(block.code).split('\n')
+    sep = ['', ''] if block.op == "OP_ADD_IMPL" and insert_at > 0 else ['']
+    if insert_at == 0:
+        sep = []
+    new_lines = (
+        file_lines[:insert_at] + sep + code_lines + [''] +
+        file_lines[insert_at:]
+    )
+    new_content = '\n'.join(new_lines).rstrip() + '\n'
+
+    # 5) Preview
+    ps = max(0, insert_at - 2)
+    pe = min(len(new_lines), insert_at + len(code_lines) + 3)
+    report["preview"] = '\n'.join(
+        f"  {i+1:4d} | {new_lines[i]}" for i in range(ps, pe)
+    )
+
+    # 6) Brace gate
+    if target.suffix.lower() in ('.c', '.h', '.cpp', '.hpp', '.cc', '.cxx'):
+        try:
+            from doxoade.commands.moddify_sys.mody_patch import PatchSurgeon
+            err = PatchSurgeon._validate_brace_balance(new_content, target)
+            if err:
+                report["status"] = "BRACE_FAIL"
+                report["errors"].append(err)
+                return report
+        except Exception:
+            pass
+
+    # 7) Write
+    if apply or shadow_dir:
+        if _write(target, new_content, apply, shadow_dir, root, report):
+            report["status"] = "APPLIED" if apply else "APPLICABLE"
+    else:
+        report["status"] = "APPLICABLE"
+    return report

@@ -582,6 +582,24 @@ class PatchSurgeon:
         return cls._find_removal_anchor(file_lines, hunk, max_offset=max_offset)
 
     @classmethod
+    def _validate_brace_balance(cls, content: str, target_path: Path) -> Optional[str]:
+        """v6.18 — Checa balanceamento de chaves em C/C++ (pré-save)."""
+        if not target_path:
+            return None
+        if target_path.suffix.lower() not in ('.c', '.h', '.cpp', '.hpp', '.cc', '.cxx'):
+            return None
+        import re as _re
+        s = _re.sub(r'/\*.*?\*/', '', content, flags=_re.DOTALL)
+        s = _re.sub(r'//[^\n]*', '', s)
+        s = _re.sub(r'"(?:\\.|[^"\\])*"', '""', s)
+        s = _re.sub(r"'(?:\\.|[^'\\])*'", "''", s)
+        opens = s.count('{')
+        closes = s.count('}')
+        if opens != closes:
+            return f"Brace mismatch: {opens} '{{' vs {closes} '}}' (delta {opens - closes:+d})"
+        return None
+
+    @classmethod
     def _validate_module_compile(cls, content: str, target_path: Path) -> Optional[str]:
         """v6.4: valida via py_compile (equivalente a compileall, sem escrever .pyc)."""
         if not target_path or target_path.suffix.lower() != ".py":
@@ -1415,6 +1433,8 @@ class PatchSurgeon:
 @click.option('--parser', 'parser_name', default=None,
               help="Força um parser específico: unified, decorated-pipe, "
                    "markdown-fence, numbered-padding, loose-pairs.")
+@click.option('--noaux', is_flag=True,
+              help='Modo raw-code: blocos path+código separados por --- (sem diff).')
 @click.option('--shadow', is_flag=True,
               help='Simula --apply em .doxoade/mody_patch/ (não toca nos reais).')
 @click.option('--shadow-dir', default='.doxoade/mody_patch',
@@ -1425,7 +1445,7 @@ class PatchSurgeon:
 def mod_patch(ctx, patch_file, apply, archive, generate, checkshot,
               checkshot_arg, keep_snapshot, report_pre_broken, force,
               freestyle, verbose, report, parser_name, code,
-              shadow, shadow_dir):
+              shadow, shadow_dir, noaux):
     """🩹 Aplica cirurgicamente patches com Ancoragem Estrutural Forte (v6.2)."""
     root = Path.cwd().resolve()
 
@@ -1517,6 +1537,88 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot,
     except Exception as e:
         click.secho(f"✘ Falha ao ler patch: {e}", fg='red')
         ctx.exit(1)
+
+    # v6.23 — Branch --noaux (raw code, sem diff syntax)
+    if noaux:
+        from doxoade.commands.moddify_sys.mody_noaux import (
+            parse_noaux, apply_raw_block,
+        )
+        _raw = parse_noaux(raw_text, root)
+        if not _raw.blocks:
+            click.secho("✘ Nenhum bloco raw (esperado: path\\n\\n<code>\\n---).", fg='red')
+            for _e in _raw.parse_errors[:5]:
+                click.secho(f"  · {_e}", fg='yellow')
+            ctx.exit(1)
+        
+        click.echo(f"  • Modo:               {Fore.MAGENTA}NOAUX (raw-code){Style.RESET_ALL}")
+        click.echo(f"  • Blocos detectados:  {len(_raw.blocks)}")
+        click.echo("─" * 75)
+        
+        _applied = _idem = _fail = _pending = 0
+        
+        for _blk in _raw.blocks:
+            click.echo(f"📄 {Fore.WHITE}{Style.BRIGHT}{_blk.path}{Style.RESET_ALL}")
+            click.echo(f"   kind={Fore.CYAN}{_blk.kind}{Style.RESET_ALL}  "
+                       f"hash={Fore.DIM}{_blk.code_hash}{Style.RESET_ALL}"
+                       + (f"  anchor={Fore.YELLOW}{_blk.anchor[:40]}{Style.RESET_ALL}" if _blk.anchor else ""))
+            
+            _res = apply_raw_block(
+                _blk, root,
+                apply=apply or bool(shadow_path),
+                shadow_dir=shadow_path,
+            )
+            
+            _st = _res["status"]
+            if _st == "IDEMPOTENT":
+                click.echo(f"   {Fore.GREEN}✔ IDEMPOTENTE{Style.RESET_ALL} em L{_res['insert_at']} — {_res['reason'][:60]}")
+                _idem += 1
+            elif _st == "APPLICABLE":
+                click.echo(f"   {Fore.GREEN}✔ APLICÁVEL{Style.RESET_ALL} em L{_res['insert_at']} — {_res['reason'][:60]}")
+                if _res.get("preview"):
+                    click.echo(f"   {Fore.CYAN}Preview:{Style.RESET_ALL}")
+                    for _pl in _res["preview"].split('\n'):
+                        click.echo(f"     {_pl}")
+                _applied += 1
+            elif _st == "APPLIED":
+                click.echo(f"   {Fore.GREEN}✔ APLICADO{Style.RESET_ALL} em L{_res['insert_at']} — {_res['reason'][:60]}")
+                _applied += 1
+            elif _st == "ANCHOR_REQUIRED":
+                click.echo(f"   {Fore.RED}✘ ANCORAGEM NECESSÁRIA{Style.RESET_ALL}")
+                for _e in _res["errors"]:
+                    click.echo(f"     {_e}")
+                _fail += 1
+            elif _st == "BRACE_FAIL":
+                click.echo(f"   {Fore.RED}✘ BRACE FAIL{Style.RESET_ALL}")
+                for _e in _res["errors"]:
+                    click.echo(f"     {_e}")
+                _fail += 1
+            elif _st == "PHASE_PENDING":
+                click.echo(f"   {Fore.YELLOW}⏳ FASE PENDENTE{Style.RESET_ALL} — {_res['errors'][0] if _res['errors'] else 'Implementação futura'}")
+                _pending += 1
+            else:
+                click.echo(f"   {Fore.RED}✘ {_st}{Style.RESET_ALL}")
+                for _e in _res["errors"]:
+                    click.echo(f"     {_e}")
+                _fail += 1
+            click.echo()
+        
+        click.echo("─" * 75)
+        click.echo(
+            f"📊 Resumo NOAUX: "
+            f"{Fore.GREEN}{_applied} aplicados{Style.RESET_ALL} | "
+            f"{Fore.YELLOW}{_idem} idempotentes{Style.RESET_ALL} | "
+            f"{Fore.CYAN}{_pending} pendentes{Style.RESET_ALL} | "
+            f"{Fore.RED if _fail > 0 else Fore.DIM}{_fail} falhas{Style.RESET_ALL}"
+        )
+        
+        if apply and _fail == 0:
+            click.secho("\n✅ Todos os blocos aplicados com sucesso!", fg='green', bold=True)
+        elif shadow_path:
+            click.secho(f"\n🔍 Shadow em {shadow_path}", fg='magenta', bold=True)
+        else:
+            click.secho("\n⚖ Simulação. Use --apply para efetivar.", fg='green', bold=True)
+        ctx.exit(0 if _fail == 0 else 1)
+    
 
     from doxoade.commands.moddify_sys.mody_freestyle import (
         FreestyleDiffParser, looks_like_freestyle,

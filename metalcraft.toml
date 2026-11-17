@@ -114,7 +114,8 @@ sources = [
     "doxoade/tools/rev_eng/src/doctor.c",
     "doxoade/tools/rev_eng/src/functions.c",
     "doxoade/tools/rev_eng/src/patterns.c",
-    "doxoade/tools/rev_eng/src/xref.c"
+    "doxoade/tools/rev_eng/src/xref.c",
+    "doxoade/tools/rev_eng/src/dominators.c"
 ]
 output = "doxoade/tools/rev_eng/bin/doxreveng.exe"
 flags = [

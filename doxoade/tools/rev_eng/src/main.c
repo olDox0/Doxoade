@@ -9,6 +9,7 @@
 #include "doctor.h"
 #include "patterns.h"
 #include "xref.h"
+#include "dominators.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,7 @@ int main(int argc, char **argv)
     else if (strcmp(argv[1], "doctor") == 0) { mode = 3; argi = 2; }
     else if (strcmp(argv[1], "functions") == 0) { mode = 4; argi = 2; }
     else if (strcmp(argv[1], "xref") == 0) { mode = 5; argi = 2; }
+    else if (strcmp(argv[1], "dominators") == 0) { mode = 6; argi = 2; }
 
     if (mode == 3) {
         const char *target = (argi < argc) ? argv[argi] : NULL;
@@ -210,6 +212,47 @@ int main(int argc, char **argv)
                             fprintf(stderr, "doxreveng: %u referências\n", xl.count);
                         }
                         xref_free(&xl);
+                    }
+                    functions_free(&fl);
+                    cfg_free(&cfg);
+                }
+                free(insns.insns);
+            }
+        }
+    }
+
+    else if (mode == 6) {
+        const SectionEntry *text = NULL;
+        for (uint32_t i = 0; i < ir.section_count; i++)
+            if (strcmp(ir.sections[i].name, ".text") == 0) { text = &ir.sections[i]; break; }
+        if (text == NULL) {
+            fprintf(stderr, "doxreveng: seção .text não encontrada\n");
+            rc = -1;
+        } else {
+            uint64_t va_base = ir.image_base + text->va - text->raw_offset;
+            InsnList insns = {0};
+            if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
+                              backend, decode_mode, &insns, err, sizeof(err)) != 0) {
+                fprintf(stderr, "doxreveng: erro no disasm: %s\n", err);
+                rc = -1;
+            } else {
+                CFG cfg = {0};
+                if (cfg_build(&insns, &cfg, err, sizeof(err)) != 0) {
+                    fprintf(stderr, "doxreveng: erro no CFG: %s\n", err);
+                    rc = -1;
+                } else {
+                    /* Extrai sub-CFG da primeira função */
+                    FunctionList fl = {0};
+                    functions_build(&insns, &cfg, &ir, &fl, err, sizeof(err));
+                    if (fl.count > 0) {
+                        CFG sub = {0};
+                        dom_extract_function(&cfg, fl.entries[0].block_first,
+                                            fl.entries[0].block_count, &sub, err, sizeof(err));
+                        DominatorTree dt = {0};
+                        dom_compute(&sub, &dt, err, sizeof(err));
+                        dom_print_text(&dt, &sub, stdout);
+                        dom_free(&dt);
+                        cfg_free(&sub);
                     }
                     functions_free(&fl);
                     cfg_free(&cfg);

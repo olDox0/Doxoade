@@ -797,9 +797,9 @@ def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwar
                 for choice in choices:
                     if len(choices) > 1:
                         print(f"\n  {Style.DIM}▶ executando ação [{choice}]...{RST}")
-                    if choice == '1' and file_label != "NATIVO":
-                        subprocess.run(['git', 'checkout', '--', info['file']], capture_output=True)
-                        print(f'  {Fore.GREEN}✔ Sucesso: {file_label} restaurado.{Style.RESET_ALL}')
+                    # if choice == '1' and file_label != "NATIVO":
+                    #     subprocess.run(['git', 'checkout', '--', info['file']], capture_output=True)
+                    #     print(f'  {Fore.GREEN}✔ Sucesso: {file_label} restaurado.{Style.RESET_ALL}')
                         
                     elif choice == '2':
                         print(f'  {C}[*] Invocando Doxly (Lite XL) na linha {info["line"]}...{RST}')

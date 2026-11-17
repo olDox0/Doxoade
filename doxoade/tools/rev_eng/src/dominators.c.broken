@@ -1,0 +1,238 @@
+/* dominators.c — Cooper-Harvey-Kennedy (2001) para idom + loops */
+#include "dominators.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define UNDEF UINT32_MAX
+
+static uint32_t dfs_postorder(const CFG *cfg, uint32_t start,
+                               uint32_t *order, uint8_t *visited)
+{
+    uint32_t n = cfg->block_count;
+    uint32_t *stack = (uint32_t *)malloc(n * sizeof(uint32_t));
+    uint32_t *next  = (uint32_t *)malloc(n * sizeof(uint32_t));
+    if (!stack || !next) { free(stack); free(next); return 0; }
+    uint32_t out_n = 0;
+    int top = 0;
+    stack[0] = start; next[0] = 0; visited[start] = 1;
+    while (top >= 0) {
+        uint32_t b = stack[top];
+        if (next[top] < cfg->blocks[b].succ_count) {
+            uint32_t s = cfg->blocks[b].succ_idx[next[top]++];
+            if (!visited[s]) {
+                visited[s] = 1;
+                top++; stack[top] = s; next[top] = 0;
+            }
+        } else { order[out_n++] = b; top--; }
+    }
+    free(stack); free(next);
+    return out_n;
+}
+
+static uint32_t dom_intersect(const DominatorTree *dt, uint32_t b1, uint32_t b2)
+{
+    while (b1 != b2) {
+        while (dt->rpo_num[b1] > dt->rpo_num[b2]) b1 = dt->idom[b1];
+        while (dt->rpo_num[b2] > dt->rpo_num[b1]) b2 = dt->idom[b2];
+    }
+    return b1;
+}
+
+int dom_compute(const CFG *cfg, DominatorTree *out,
+                char *err_buf, size_t err_buf_size)
+{
+    if (cfg == NULL || out == NULL) return -1;
+    memset(out, 0, sizeof(*out));
+    uint32_t n = cfg->block_count;
+    if (n == 0) return 0;
+
+    out->nblocks = n;
+    out->rpo     = (uint32_t *)malloc(n * sizeof(uint32_t));
+    out->rpo_num = (uint32_t *)malloc(n * sizeof(uint32_t));
+    out->idom    = (uint32_t *)malloc(n * sizeof(uint32_t));
+    out->reachable = (uint8_t *)calloc(n, 1);
+    if (!out->rpo || !out->rpo_num || !out->idom || !out->reachable) {
+        snprintf(err_buf, err_buf_size, "malloc dominators falhou");
+        dom_free(out); return -1;
+    }
+
+    uint8_t *visited = (uint8_t *)calloc(n, 1);
+    if (!visited) { dom_free(out); return -1; }
+    uint32_t count = dfs_postorder(cfg, 0, out->rpo, visited);
+    free(visited);
+
+    for (uint32_t i = 0; i < count / 2; i++) {
+        uint32_t tmp = out->rpo[i];
+        out->rpo[i] = out->rpo[count - 1 - i];
+        out->rpo[count - 1 - i] = tmp;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        out->rpo_num[out->rpo[i]] = i;
+        out->reachable[out->rpo[i]] = 1;
+    }
+
+    for (uint32_t i = 0; i < n; i++) out->idom[i] = UNDEF;
+    out->idom[out->rpo[0]] = out->rpo[0];
+
+    int changed = 1;
+    while (changed) {
+        changed = 0;
+        for (uint32_t i = 1; i < count; i++) {
+            uint32_t b = out->rpo[i];
+            uint32_t new_idom = UNDEF;
+            for (uint32_t p = 0; p < cfg->blocks[b].pred_count; p++) {
+                uint32_t pb = cfg->blocks[b].pred_idx[p];
+                if (out->idom[pb] != UNDEF) { new_idom = pb; break; }
+            }
+            if (new_idom == UNDEF) continue;
+            for (uint32_t p = 0; p < cfg->blocks[b].pred_count; p++) {
+                uint32_t pb = cfg->blocks[b].pred_idx[p];
+                if (out->idom[pb] == UNDEF) continue;
+                new_idom = dom_intersect(out, pb, new_idom);
+            }
+            if (out->idom[b] != new_idom) { out->idom[b] = new_idom; changed = 1; }
+        }
+    }
+    return 0;
+}
+
+void dom_free(DominatorTree *dt)
+{
+    if (dt == NULL) return;
+    free(dt->rpo); dt->rpo = NULL;
+    free(dt->rpo_num); dt->rpo_num = NULL;
+    free(dt->idom); dt->idom = NULL;
+    free(dt->reachable); dt->reachable = NULL;
+    dt->nblocks = 0;
+}
+
+int dom_dominates(const DominatorTree *dt, uint32_t a, uint32_t b)
+{
+    if (dt == NULL || a >= dt->nblocks || b >= dt->nblocks) return 0;
+    if (!dt->reachable[b]) return 0;
+    if (a == b) return 1;
+    uint32_t cur = b;
+    while (cur != dt->idom[cur]) {
+        cur = dt->idom[cur];
+        if (cur == a) return 1;
+    }
+    return (cur == a);
+}
+
+uint32_t dom_count_loops(const DominatorTree *dt, const CFG *cfg)
+{
+    uint32_t loops = 0;
+    for (uint32_t b = 0; b < cfg->block_count; b++) {
+        for (uint32_t i = 0; i < cfg->blocks[b].succ_count; i++) {
+            uint32_t s = cfg->blocks[b].succ_idx[i];
+            if (s == b) { loops++; continue; }
+            if (dom_dominates(dt, s, b)) loops++;
+        }
+    }
+    return loops;
+}
+
+void dom_print_text(const DominatorTree *dt, const CFG *cfg, FILE *out)
+{
+    if (dt == NULL || cfg == NULL || out == NULL) return;
+    uint32_t reachable = 0;
+    for (uint32_t i = 0; i < dt->nblocks; i++)
+        if (dt->reachable[i]) reachable++;
+    fprintf(out, "[DOM] %u/%u blocos alcançáveis, %u loop(s)\n\n",
+            reachable, dt->nblocks, dom_count_loops(dt, cfg));
+    fprintf(out, "  idom (dominador imediato):\n");
+    for (uint32_t b = 0; b < dt->nblocks; b++) {
+        if (!dt->reachable[b]) {
+            fprintf(out, "    bloco %4u: inalcançável\n", b); continue;
+        }
+        uint32_t id = dt->idom[b];
+        if (id == b)
+            fprintf(out, "    bloco %4u: (entry) 0x%llx\n",
+                    b, (unsigned long long)cfg->blocks[b].start_va);
+        else
+            fprintf(out, "    bloco %4u: idom=%u (0x%llx)  [0x%llx]\n",
+                    b, id, (unsigned long long)cfg->blocks[id].start_va,
+                    (unsigned long long)cfg->blocks[b].start_va);
+    }
+    fprintf(out, "\n  loops naturais:\n");
+    uint32_t found = 0;
+    for (uint32_t b = 0; b < cfg->block_count; b++) {
+        for (uint32_t i = 0; i < cfg->blocks[b].succ_count; i++) {
+            uint32_t s = cfg->blocks[b].succ_idx[i];
+            if (s == b) {
+                fprintf(out, "    self-loop em bloco %u (0x%llx)\n",
+                        b, (unsigned long long)cfg->blocks[b].start_va);
+                found++; continue;
+            }
+            if (dom_dominates(dt, s, b)) {
+                fprintf(out, "    loop: header=%u (0x%llx) back-edge=bloco %u (0x%llx)\n",
+                        s, (unsigned long long)cfg->blocks[s].start_va,
+                        b, (unsigned long long)cfg->blocks[b].start_va);
+                found++;
+            }
+
+
+/* Extrai um sub-CFG contendo apenas os blocos [first, first+count).
+ * Os sucessores/predecessores fora da faixa são removidos.
+ * `out` deve ser liberado com cfg_free(). */
+int dom_extract_function(const CFG *cfg, uint32_t first, uint32_t count,
+                         CFG *out, char *err_buf, size_t err_buf_size)
+{
+    if (first + count > cfg->block_count) {
+        snprintf(err_buf, err_buf_size, "faixa de função fora dos limites");
+        return -1;
+    }
+    memset(out, 0, sizeof(*out));
+    out->insns = cfg->insns;
+    out->block_count = count;
+    out->blocks = (BasicBlock *)calloc(count, sizeof(BasicBlock));
+    if (out->blocks == NULL) {
+        snprintf(err_buf, err_buf_size, "calloc sub-CFG falhou");
+        return -1;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        const BasicBlock *src = &cfg->blocks[first + i];
+        BasicBlock *dst = &out->blocks[i];
+        dst->start_va    = src->start_va;
+        dst->end_va      = src->end_va;
+        dst->insn_first  = src->insn_first;
+        dst->insn_count  = src->insn_count;
+        dst->succ_count  = 0;
+        dst->succ_idx    = NULL;
+        dst->pred_count  = 0;
+        dst->pred_idx    = NULL;
+    }
+    /* Copia sucessores dentro da faixa. */
+    for (uint32_t i = 0; i < count; i++) {
+        const BasicBlock *src = &cfg->blocks[first + i];
+        BasicBlock *dst = &out->blocks[i];
+        for (uint32_t s = 0; s < src->succ_count; s++) {
+            uint32_t sc = src->succ_idx[s];
+            if (sc < first || sc >= first + count) continue;
+            dst->succ_idx = (uint32_t *)realloc(
+                dst->succ_idx, (dst->succ_count + 1) * sizeof(uint32_t));
+            if (dst->succ_idx == NULL) { cfg_free(out); return -1; }
+            dst->succ_idx[dst->succ_count++] = sc - first;
+        }
+    }
+    /* Copia predecessores dentro da faixa. */
+    for (uint32_t i = 0; i < count; i++) {
+        const BasicBlock *src = &cfg->blocks[first + i];
+        BasicBlock *dst = &out->blocks[i];
+        for (uint32_t p = 0; p < src->pred_count; p++) {
+            uint32_t pc = src->pred_idx[p];
+            if (pc < first || pc >= first + count) continue;
+            dst->pred_idx = (uint32_t *)realloc(
+                dst->pred_idx, (dst->pred_count + 1) * sizeof(uint32_t));
+            if (dst->pred_idx == NULL) { cfg_free(out); return -1; }
+            dst->pred_idx[dst->pred_count++] = pc - first;
+        }
+    }
+    return 0;
+}
+
+        }
+    }
+    if (found == 0) fprintf(out, "    (nenhum loop detectado)\n");
+}

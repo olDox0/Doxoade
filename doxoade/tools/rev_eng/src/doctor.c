@@ -9,6 +9,7 @@
 #include "functions.h"
 #include "patterns.h"
 #include "xref.h"
+#include "dominators.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -385,6 +386,49 @@ static int test_xref(const char *path, const PreIR *ir)
     return 0;
 }
 
+static int test_dominators(const char *path, const PreIR *ir)
+{
+    printf("[DOMINATORS]\n");
+    if (path == NULL || ir == NULL) { report(INFO, "sem alvo, pulando"); return 0; }
+    const SectionEntry *text = NULL;
+    for (uint32_t i = 0; i < ir->section_count; i++)
+        if (strcmp(ir->sections[i].name, ".text") == 0) { text = &ir->sections[i]; break; }
+    if (text == NULL) { report(WARN, "sem .text, pulando"); return 0; }
+
+    DecodeMode mode = (strcmp(ir->format, "PE32") == 0) ? DECODE_MODE_32 : DECODE_MODE_64;
+    FileReader fr;
+    char err[256] = {0};
+    if (file_reader_open(path, &fr, err, sizeof(err)) != 0) {
+        report(FAIL, "abrir: %s", err); g_fail++; return -1;
+    }
+    uint64_t va_base = ir->image_base + text->va - text->raw_offset;
+    InsnList insns = {0};
+    if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
+                       BACKEND_CAPSTONE, mode, &insns, err, sizeof(err)) != 0) {
+        report(FAIL, "disasm_collect: %s", err);
+        file_reader_close(&fr); g_fail++; return -1;
+    }
+    CFG cfg = {0};
+    if (cfg_build(&insns, &cfg, err, sizeof(err)) != 0) {
+        report(FAIL, "cfg_build: %s", err);
+        free(insns.insns); file_reader_close(&fr); g_fail++; return -1;
+    }
+    DominatorTree dt = {0};
+    if (dom_compute(&cfg, &dt, err, sizeof(err)) != 0) {
+        report(FAIL, "dom_compute: %s", err);
+    } else {
+        uint32_t reachable = 0;
+        for (uint32_t i = 0; i < dt.nblocks; i++) if (dt.reachable[i]) reachable++;
+        report(PASS, "%u/%u blocos alcançáveis", reachable, dt.nblocks);
+        report(INFO, "%u loop(s) detectado(s)", dom_count_loops(&dt, &cfg));
+        dom_free(&dt);
+    }
+    cfg_free(&cfg);
+    free(insns.insns);
+    file_reader_close(&fr);
+    return 0;
+}
+
 /* ---------- doctor_run ---------- */
 int doctor_run(const char *target)
 {
@@ -411,6 +455,11 @@ int doctor_run(const char *target)
         test_patterns(target, &ir);
         printf("\n");
         test_xref(target, &ir);
+        printf("\n");
+        test_dominators(target, &ir);
+        printf("\n");
+        pre_ir_free(&ir);
+        
         printf("\n");
         pre_ir_free(&ir);
     }
